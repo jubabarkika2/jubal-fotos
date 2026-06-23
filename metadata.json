@@ -1,0 +1,6 @@
+{
+  "name": "Gmail Photo Gallery",
+  "description": "Uma galeria de fotos integrada com a API do Gmail que transforma anexos de fotos recebidos em um álbum visual elegante.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
