@@ -1,5 +1,13 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, type User } from 'firebase/auth';
+import { 
+  getAuth, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  type User 
+} from 'firebase/auth';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Inicializa o Firebase
@@ -26,6 +34,21 @@ export const initAuth = (
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
+        // Tenta checar se viemos de um redirecionamento bem-sucedido
+        try {
+          const result = await getRedirectResult(auth);
+          if (result) {
+            const credential = GoogleAuthProvider.credentialFromResult(result);
+            if (credential?.accessToken) {
+              cachedAccessToken = credential.accessToken;
+              if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error("Erro no getRedirectResult do AuthChanged:", error);
+        }
+
         // Se já está logado mas perdeu o token (ex: refresh de página),
         // precisaremos efetuar sign-in de novo para obter o token de acesso da API do Google,
         // já que o Firebase não o persiste no localStorage automaticamente para APIs de terceiros.
@@ -39,7 +62,25 @@ export const initAuth = (
   });
 };
 
-// Efetua login com o Google Popup
+// Captura resultado pendente de redirecionamento na primeira carga
+export const checkRedirectResult = async (): Promise<{ user: User; accessToken: string } | null> => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        return { user: result.user, accessToken: cachedAccessToken };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("Erro ao checar resultado de redirecionamento:", error);
+    throw error;
+  }
+};
+
+// Efetua login com o Google Popup (ideal para canais desktop)
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
@@ -52,10 +93,22 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
-    console.error('Erro de login:', error);
+    console.error('Erro de login por Popup:', error);
     throw error;
   } finally {
     isSigningIn = false;
+  }
+};
+
+// Efetua login com o Google Redirect (essencial para celulares para contornar qualquer bloqueio de popup)
+export const googleSignInRedirect = async (): Promise<void> => {
+  try {
+    isSigningIn = true;
+    await signInWithRedirect(auth, provider);
+  } catch (error: any) {
+    console.error('Erro de login por Redirecionamento:', error);
+    isSigningIn = false;
+    throw error;
   }
 };
 
