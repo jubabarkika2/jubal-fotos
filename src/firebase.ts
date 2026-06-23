@@ -6,13 +6,22 @@ import {
   getRedirectResult, 
   GoogleAuthProvider, 
   onAuthStateChanged, 
-  type User 
+  type User,
+  type Auth
 } from 'firebase/auth';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Inicializa o Firebase
+// Inicializa o Firebase com tratamento de erro
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+let authInstance: Auth | null = null;
+try {
+  authInstance = getAuth(app);
+} catch (e) {
+  console.error("Falha de segurança ao acessar localStorage/IndexedDB no iframe:", e);
+}
+
+export const auth = authInstance;
 
 // Configura o provedor Google Auth com os escopos requisitados
 export const provider = new GoogleAuthProvider();
@@ -29,31 +38,20 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  if (!auth) {
+    if (onAuthFailure) onAuthFailure();
+    return () => {}; // Retorna uma função vazia de unsubscribe
+  }
+
+  return onAuthStateChanged(auth, (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        // Tenta checar se viemos de um redirecionamento bem-sucedido
-        try {
-          const result = await getRedirectResult(auth);
-          if (result) {
-            const credential = GoogleAuthProvider.credentialFromResult(result);
-            if (credential?.accessToken) {
-              cachedAccessToken = credential.accessToken;
-              if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-              return;
-            }
-          }
-        } catch (error) {
-          console.error("Erro no getRedirectResult do AuthChanged:", error);
+      } else {
+        // Se o token não está em cache e não está no meio do login, reporta falha de sessão temporária
+        if (!isSigningIn && onAuthFailure) {
+          onAuthFailure();
         }
-
-        // Se já está logado mas perdeu o token (ex: refresh de página),
-        // precisaremos efetuar sign-in de novo para obter o token de acesso da API do Google,
-        // já que o Firebase não o persiste no localStorage automaticamente para APIs de terceiros.
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
@@ -64,6 +62,7 @@ export const initAuth = (
 
 // Captura resultado pendente de redirecionamento na primeira carga
 export const checkRedirectResult = async (): Promise<{ user: User; accessToken: string } | null> => {
+  if (!auth) return null;
   try {
     const result = await getRedirectResult(auth);
     if (result) {
@@ -82,6 +81,9 @@ export const checkRedirectResult = async (): Promise<{ user: User; accessToken: 
 
 // Efetua login com o Google Popup (ideal para canais desktop)
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  if (!auth) {
+    throw new Error("O Firebase Auth não pôde de inicializar neste navegador (provavelmente cookies de terceiros estão bloqueados).");
+  }
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
@@ -102,6 +104,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 
 // Efetua login com o Google Redirect (essencial para celulares para contornar qualquer bloqueio de popup)
 export const googleSignInRedirect = async (): Promise<void> => {
+  if (!auth) {
+    throw new Error("O Firebase Auth não pôde de inicializar neste navegador (provavelmente cookies de terceiros estão bloqueados).");
+  }
   try {
     isSigningIn = true;
     await signInWithRedirect(auth, provider);
@@ -117,6 +122,7 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const logout = async () => {
+  if (!auth) return;
   await auth.signOut();
   cachedAccessToken = null;
 };
